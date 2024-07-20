@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import itertools
+import json
 import os
 import shlex
 import shutil
 import sys
 from pathlib import Path
+from subprocess import run  # nosec
 from typing import cast
 
 import click
@@ -100,6 +102,21 @@ def cli(
 
     if python_executable:
         _validate_python_executable(python_executable)
+        environment = json.loads(
+            run(  # nosec
+                [
+                    python_executable,
+                    "-m",
+                    "pip",
+                    "inspect",
+                ],
+                check=True,
+                capture_output=True,
+                text=True,
+            ).stdout
+        )["environment"]
+    else:
+        environment = None
 
     install_command = cast(InstallCommand, create_command("install"))
     options, _ = install_command.parse_args([])
@@ -113,7 +130,9 @@ def cli(
     )
 
     try:
-        merged_requirements = sync.merge(requirements, ignore_conflicts=force)
+        merged_requirements = sync.merge(
+            requirements, ignore_conflicts=force, environment=environment
+        )
     except PipToolsError as e:
         log.error(str(e))
         sys.exit(2)
@@ -128,7 +147,9 @@ def cli(
         local_only=python_executable is None,
         paths=paths,
     )
-    to_install, to_uninstall = sync.diff(merged_requirements, installed_dists)
+    to_install, to_uninstall = sync.diff(
+        merged_requirements, installed_dists, environment
+    )
 
     install_flags = _compose_install_flags(
         finder,
